@@ -1,0 +1,147 @@
+# Data Platform on EC2. Based on data-platform/docker-compose.prod.yml:
+#   - frontend removed (React app is on S3 + CloudFront)
+#   - conversion-worker commented out (conversions run on AWS Batch)
+#   - titiler port 8001 added (host Nginx proxies /titiler/ to it)
+
+services:
+  backend:
+    build:
+      context: ./src/api
+      dockerfile: Dockerfile.api
+    #expose:
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./.env
+    networks:
+      - appnet
+    depends_on:
+      redis:
+        condition: service_healthy
+      email-worker:
+        condition: service_healthy
+      typesense:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  redis:
+    image: redis:latest
+    networks:
+      - appnet
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-e", "QUIT"]
+
+  typesense:
+    image: typesense/typesense:27.1
+    networks:
+      - appnet
+    ports:
+      - "8108:8108"
+    volumes:
+      - typesense_data:/data
+    command: ["--data-dir", "/data", "--api-key", "${TYPESENSE_API_KEY:-xyz}", "--enable-cors"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8108/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  email-worker:
+    build:
+      context: ./src/api
+      dockerfile: Dockerfile.email
+    env_file:
+      - ./.env
+    networks:
+      - appnet
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    # Optional: Override command to specify queues and concurrency
+    # command: ["uv", "run", "celery", "-A", "celery_worker", "worker", "--loglevel=info", "-Q", "email,default", "--concurrency=2"]
+    healthcheck:
+      test: ["CMD-SHELL", "uv run celery -A celery_worker inspect ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  titiler:
+    image: ghcr.io/developmentseed/titiler:latest
+    platform: linux/amd64
+    command:
+      [
+        "uvicorn",
+        "titiler.application.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--workers",
+        "1",
+      ]
+    environment:
+      CPL_TMPDIR: /tmp
+      GDAL_CACHEMAX: 75%
+      GDAL_DISABLE_READDIR_ON_OPEN: EMPTY_DIR
+      GDAL_HTTP_MERGE_CONSECUTIVE_RANGES: "YES"
+      GDAL_HTTP_MULTIPLEX: "YES"
+      GDAL_HTTP_VERSION: "2"
+      VSI_CACHE: "TRUE"
+      VSI_CACHE_SIZE: "536870912"
+      TITILER_API_CORS_ORIGINS: "*"
+    ports:
+      - "8001:8000"
+    restart: unless-stopped
+    networks:
+      - appnet
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # Conversions run on AWS Batch, not on EC2.
+  # conversion-worker:
+  #   build:
+  #     context: ./src/api
+  #     dockerfile: Dockerfile.conversion
+  #   env_file:
+  #     - ./.env
+  #   networks:
+  #     - appnet
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "uv run celery -A celery_cpu_worker inspect ping || exit 1"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 20s
+
+networks:
+  appnet:
+
+volumes:
+  typesense_data:

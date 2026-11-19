@@ -1,0 +1,203 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  install:
+    commands:
+      - |
+        set -euo pipefail
+        echo "Installing Python dependency manager..."
+        python3 -m pip install --quiet uv
+        uv --version
+
+  pre_build:
+    commands:
+      - |
+        set -euo pipefail
+
+        echo "Validating required environment variables..."
+
+        : "${AWS_REGION:?AWS_REGION is required}"
+        : "${ECR_REGISTRY:?ECR_REGISTRY is required}"
+        : "${CONVERSION_REPO:?CONVERSION_REPO is required}"
+        : "${CONVERSION_DOCKERFILE:?CONVERSION_DOCKERFILE is required}"
+        : "${BACKEND_DOCKERFILE:?BACKEND_DOCKERFILE is required}"
+        : "${EMAIL_DOCKERFILE:?EMAIL_DOCKERFILE is required}"
+        : "${COMPOSE_PROJECT:?COMPOSE_PROJECT is required}"
+        : "${PROXY_HTTPS_PORT:?PROXY_HTTPS_PORT is required}"
+        : "${TLS_CERT_DIR:?TLS_CERT_DIR is required}"
+
+        IMAGE_TAG="${CODEBUILD_RESOLVED_SOURCE_VERSION:0:12}"
+
+        if [[ ! "$IMAGE_TAG" =~ ^[a-f0-9]{12}$ ]]; then
+          echo "ERROR: Invalid Git commit SHA: $IMAGE_TAG"
+          exit 1
+        fi
+
+        export IMAGE_TAG
+
+        echo "Commit: $CODEBUILD_RESOLVED_SOURCE_VERSION"
+        echo "Image tag: $IMAGE_TAG"
+        echo "AWS Region: $AWS_REGION"
+
+        echo "Logging in to AWS ECR..."
+        aws ecr get-login-password --region "$AWS_REGION" \
+          | docker login \
+              --username AWS \
+              --password-stdin "$ECR_REGISTRY"
+
+
+        echo "Validating Dockerfile paths..."
+
+        test -f "$CODEBUILD_SRC_DIR/$CONVERSION_DOCKERFILE"
+        test -f "$CODEBUILD_SRC_DIR/$BACKEND_DOCKERFILE"
+        test -f "$CODEBUILD_SRC_DIR/$EMAIL_DOCKERFILE"
+
+        echo "Dockerfile validation completed."
+
+        # Run backend tests unless explicitly disabled.
+        if [[ "${RUN_TESTS:-true}" == "true" ]]; then
+          echo "Installing test dependencies and running pytest..."
+
+          cd "$CODEBUILD_SRC_DIR/src/api"
+
+          uv sync --frozen --extra dev --extra visualization
+
+          uv run pytest -q
+
+          echo "Pytest completed successfully."
+        else
+          echo "RUN_TESTS=false: pytest skipped."
+        fi
+
+  build:
+    commands:
+      # ------------------------------------------------
+      # 1. Build ONLY the Conversion image and push to ECR
+      # ------------------------------------------------
+      - |
+        set -euo pipefail
+
+        cd "$CODEBUILD_SRC_DIR"
+
+        IMAGE_TAG="${CODEBUILD_RESOLVED_SOURCE_VERSION:0:12}"
+        IMAGE_URI="$ECR_REGISTRY/$CONVERSION_REPO:$IMAGE_TAG"
+
+        echo "Conversion image: $IMAGE_URI"
+
+        if aws ecr describe-images \
+          --region "$AWS_REGION" \
+          --repository-name "$CONVERSION_REPO" \
+          --image-ids imageTag="$IMAGE_TAG" \
+          >/dev/null 2>&1; then
+
+          echo "Image already exists. Reusing: $IMAGE_URI"
+
+        else
+
+          echo "Building Conversion Docker image..."
+
+          docker build \
+            --file "$CONVERSION_DOCKERFILE" \
+            --build-arg APP_VERSION="$IMAGE_TAG" \
+            --label "org.opencontainers.image.revision=$CODEBUILD_RESOLVED_SOURCE_VERSION" \
+            --tag "$IMAGE_URI" \
+            src/api
+
+          echo "Pushing Conversion image to ECR..."
+          docker push "$IMAGE_URI"
+
+        fi
+
+        echo "Conversion image is ready."
+
+      # ------------------------------------------------
+      # 2. Package CodeDeploy revision for EC2
+      # ------------------------------------------------
+      - |
+        set -euo pipefail
+
+        OUT="$CODEBUILD_SRC_DIR/deploy-artifact"
+
+        echo "Creating CodeDeploy artifact..."
+        rm -rf "$OUT"
+        mkdir -p "$OUT"
+
+        # Copy deployment files from the repository (deployment/ec2).
+        echo "Copying EC2 deployment files..."
+
+        SRC="$CODEBUILD_SRC_DIR/deployment/ec2"
+        cp -r \
+          "$SRC/appspec.yml" \
+          "$SRC/docker-compose.yml" \
+          "$SRC/nginx" \
+          "$SRC/scripts" \
+          "$OUT/"
+
+        # Validate required deployment files.
+        echo "Validating deployment bundle..."
+
+        REQUIRED_FILES=(
+          "appspec.yml"
+          "docker-compose.yml"
+          "nginx/data-platform.conf"
+          "scripts/common.sh"
+          "scripts/before_install.sh"
+          "scripts/after_install.sh"
+          "scripts/application_start.sh"
+          "scripts/validate_service.sh"
+        )
+
+        for file in "${REQUIRED_FILES[@]}"; do
+          if [[ ! -s "$OUT/$file" ]]; then
+            echo "ERROR: Required file missing or empty: $OUT/$file"
+            echo "Check the deployment/ec2 folder in the repository."
+            exit 1
+          fi
+        done
+
+        chmod +x "$OUT"/scripts/*.sh
+
+        # Copy backend application source for EC2-side Docker builds.
+        # Do not package secrets, local environments or Python caches.
+        echo "Packaging backend application source..."
+
+        tar -C "$CODEBUILD_SRC_DIR" \
+          --exclude='.venv' \
+          --exclude='__pycache__' \
+          --exclude='.pytest_cache' \
+          --exclude='.env' \
+          --exclude='.env.*' \
+          --exclude='.git' \
+          -cf - src/api \
+          | tar -C "$OUT" -xf -
+
+        # Generate non-secret deployment configuration.
+        echo "Generating deploy.env..."
+
+        {
+          echo "IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:0:12}"
+          echo "AWS_REGION=$AWS_REGION"
+          echo "COMPOSE_PROJECT=$COMPOSE_PROJECT"
+          echo "PROXY_HTTPS_PORT=$PROXY_HTTPS_PORT"
+          echo "TLS_CERT_DIR=$TLS_CERT_DIR"
+        } > "$OUT/deploy.env"
+
+        # Image metadata for later CodePipeline stages.
+        IMAGE_TAG="${CODEBUILD_RESOLVED_SOURCE_VERSION:0:12}"
+        IMAGE_URI="$ECR_REGISTRY/$CONVERSION_REPO:$IMAGE_TAG"
+
+        echo "$IMAGE_TAG" > "$OUT/image_tag.txt"
+        echo "$IMAGE_URI" > "$OUT/image_uri.txt"
+
+        echo "CodeDeploy revision package completed."
+
+        echo "Final artifact contents:"
+        find "$OUT" -maxdepth 3 -type f -print
+
+artifacts:
+  base-directory: deploy-artifact
+  files:
+    - "**/*"

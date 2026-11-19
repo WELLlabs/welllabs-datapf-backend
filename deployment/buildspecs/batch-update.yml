@@ -1,0 +1,61 @@
+# Backend pipeline - third stage (UpdateBatch). Runs only after the CodeDeploy
+# stage succeeded, so the new database schema is already in place.
+# Registers a new revision of the Batch job definition with the conversion
+# image built in this pipeline run. Jobs are submitted by definition NAME, so
+# they use this revision from now on.
+#
+# Input: build_output (image_tag.txt)
+# Environment variables (set by Terraform):
+#   JOB_DEFINITION_NAME   Batch job definition (name, no revision)
+#   CONVERSION_IMAGE_REPO full ECR repository URL of the conversion image
+
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  build:
+    commands:
+      - set -euo pipefail
+      # image_tag.txt is written by the Build stage at the root of build_output.
+      - test -s "$CODEBUILD_SRC_DIR/image_tag.txt" || { echo "image_tag.txt missing from build_output"; ls -la "$CODEBUILD_SRC_DIR"; exit 1; }
+      - IMAGE_TAG="$(tr -d '[:space:]' < "$CODEBUILD_SRC_DIR/image_tag.txt")"
+      - '[[ "$IMAGE_TAG" =~ ^[0-9a-f]{7,40}$ ]] || { echo "Invalid image tag: $IMAGE_TAG"; exit 1; }'
+      - IMAGE="$CONVERSION_IMAGE_REPO:$IMAGE_TAG"
+      - aws ecr describe-images --repository-name "${CONVERSION_IMAGE_REPO##*/}" --image-ids imageTag="$IMAGE_TAG" >/dev/null
+      - echo "Registering a new revision of $JOB_DEFINITION_NAME with $IMAGE"
+      - |
+        set -euo pipefail
+        aws batch describe-job-definitions --job-definition-name "$JOB_DEFINITION_NAME" --status ACTIVE \
+          --query 'reverse(sort_by(jobDefinitions, &revision))[0]' --output json > latest.json
+        python3 - "$IMAGE" <<'PY'
+        import json, sys
+        latest = json.load(open("latest.json"))
+        if not latest:
+            sys.exit("No ACTIVE job definition found; run terraform apply first.")
+        # Copy every setting of the latest revision; change only the image.
+        keep = ["jobDefinitionName", "type", "parameters", "schedulingPriority", "retryStrategy",
+                "timeout", "platformCapabilities", "containerProperties", "propagateTags", "tags"]
+        new = {k: latest[k] for k in keep if k in latest}
+        print("Previous revision:", latest["revision"], "image:", latest["containerProperties"]["image"])
+        new["containerProperties"]["image"] = sys.argv[1]
+        json.dump(new, open("register.json", "w"))
+        PY
+        NEW_ARN="$(aws batch register-job-definition --cli-input-json file://register.json \
+          --query 'jobDefinitionArn' --output text)"
+        echo "Registered $NEW_ARN"
+        # Verify the new revision really carries the new image and the old settings.
+        aws batch describe-job-definitions --job-definitions "$NEW_ARN" \
+          --query 'jobDefinitions[0].containerProperties' --output json > registered.json
+        python3 - "$IMAGE" <<'PY'
+        import json, sys
+        old = json.load(open("latest.json"))["containerProperties"]
+        new = json.load(open("registered.json"))
+        assert new["image"] == sys.argv[1], f"image is {new['image']}"
+        for key in ("command", "jobRoleArn", "executionRoleArn", "resourceRequirements",
+                    "environment", "secrets", "networkConfiguration", "logConfiguration"):
+            assert new.get(key) == old.get(key), f"{key} changed"
+        print("Verified: new image, all other settings unchanged")
+        PY
+        echo "Batch now uses $IMAGE"
