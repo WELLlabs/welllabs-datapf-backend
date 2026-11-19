@@ -1,0 +1,41 @@
+# Debian slim. The Alpine base could not install packages: the apk index
+# either failed to parse or the downloads were truncated.
+FROM python:3.13-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libffi-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir uv
+
+WORKDIR /app
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --extra visualization
+
+FROM python:3.13-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir uv
+
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /app && \
+    chown -R appuser:appuser /app
+
+WORKDIR /app
+
+COPY --chown=appuser:appuser --from=builder /app/.venv /app/.venv
+
+COPY --chown=appuser:appuser core/ ./core/
+COPY --chown=appuser:appuser tasks/ ./tasks/
+COPY --chown=appuser:appuser emails/ ./emails/
+COPY --chown=appuser:appuser __init__.py ./
+COPY --chown=appuser:appuser celery_worker.py ./
+
+USER appuser
+
+CMD ["uv", "run", "celery", "-A", "celery_worker", "worker", "--loglevel=debug", "-P", "gevent", "-Q", "email", "--concurrency=200"]
