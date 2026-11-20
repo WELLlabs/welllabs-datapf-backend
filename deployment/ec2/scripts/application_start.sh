@@ -6,8 +6,7 @@
 
 compose up -d --build || fail "docker compose up failed."
 
-sed -e "s#listen 443 ssl;#listen ${PROXY_HTTPS_PORT} ssl;#" \
-    -e "s#/etc/data-platform/ssl/#${TLS_CERT_DIR%/}/#g" \
+sed -e "s#listen 80 default_server;#listen ${PROXY_PORT} default_server;#" \
     "$RELEASE_DIR/nginx/data-platform.conf" >/etc/nginx/conf.d/data-platform.conf
 nginx -t || fail "nginx -t failed."
 systemctl reload nginx

@@ -2,8 +2,10 @@
 # Shared by the CodeDeploy hooks. Sourced, not run.
 #
 # deploy.env (written by the build stage, non-secret) provides:
-#   IMAGE_TAG AWS_REGION COMPOSE_PROJECT PROXY_HTTPS_PORT TLS_CERT_DIR
-# Secrets stay in /opt/data-platform/.env, which no script writes.
+#   IMAGE_TAG AWS_REGION COMPOSE_PROJECT PROXY_PORT
+#   BACKEND_ENV_SECRET_ID (secret name only)
+# Secrets live in Secrets Manager; before_install.sh writes them to
+# /opt/data-platform/.env (mode 600) on every deploy.
 
 set -euo pipefail
 

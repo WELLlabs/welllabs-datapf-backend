@@ -9,8 +9,8 @@ SITE_HOST="${SITE_HOST%%/*}"
 [ -n "$SITE_HOST" ] || fail "DOMAIN is not set in .env."
 
 for attempt in $(seq 1 30); do
-  body="$(curl -fsk --max-time 10 -H "Host: ${SITE_HOST}" \
-    "https://127.0.0.1:${PROXY_HTTPS_PORT}/api/health" 2>/dev/null || true)"
+  body="$(curl -fs --max-time 10 -H "Host: ${SITE_HOST}" \
+    "http://127.0.0.1:${PROXY_PORT}/api/health" 2>/dev/null || true)"
   if [[ "$body" == *'"healthy"'* ]]; then
     log "Health check passed: $body"
     exit 0

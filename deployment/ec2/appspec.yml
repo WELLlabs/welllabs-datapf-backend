@@ -3,7 +3,7 @@
 # build stage adds it to the artifact next to src/api, deploy.env and
 # image_tag.txt. Hooks run as root from the unpacked revision.
 #
-#   BeforeInstall     checks (.env, certificate, docker, aws cli)
+#   BeforeInstall     checks (docker, aws cli, nginx), writes .env from Secrets Manager
 #   (Install)         copy the revision to /opt/data-platform/release
 #   AfterInstall      pull images, build backend + email, back up DB, migrate
 #   ApplicationStart  docker compose up -d --build

@@ -26,8 +26,8 @@ phases:
         : "${BACKEND_DOCKERFILE:?BACKEND_DOCKERFILE is required}"
         : "${EMAIL_DOCKERFILE:?EMAIL_DOCKERFILE is required}"
         : "${COMPOSE_PROJECT:?COMPOSE_PROJECT is required}"
-        : "${PROXY_HTTPS_PORT:?PROXY_HTTPS_PORT is required}"
-        : "${TLS_CERT_DIR:?TLS_CERT_DIR is required}"
+        : "${PROXY_PORT:?PROXY_PORT is required}"
+        : "${BACKEND_ENV_SECRET_ID:?BACKEND_ENV_SECRET_ID is required}"
 
         IMAGE_TAG="${CODEBUILD_RESOLVED_SOURCE_VERSION:0:12}"
 
@@ -181,8 +181,8 @@ phases:
           echo "IMAGE_TAG=${CODEBUILD_RESOLVED_SOURCE_VERSION:0:12}"
           echo "AWS_REGION=$AWS_REGION"
           echo "COMPOSE_PROJECT=$COMPOSE_PROJECT"
-          echo "PROXY_HTTPS_PORT=$PROXY_HTTPS_PORT"
-          echo "TLS_CERT_DIR=$TLS_CERT_DIR"
+          echo "PROXY_PORT=$PROXY_PORT"
+          echo "BACKEND_ENV_SECRET_ID=$BACKEND_ENV_SECRET_ID" # secret name only; EC2 reads the values
         } > "$OUT/deploy.env"
 
         # Image metadata for later CodePipeline stages.
