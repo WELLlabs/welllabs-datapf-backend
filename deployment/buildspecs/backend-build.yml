@@ -9,7 +9,10 @@ phases:
       - |
         set -euo pipefail
         echo "Installing Python dependency manager..."
-        python3 -m pip install --quiet uv
+        # Standalone uv binary: a pip-installed uv lives under one pyenv version
+        # and disappears when src/api/.python-version (3.13) switches pyenv.
+        curl -LsSf https://astral.sh/uv/0.13.9/install.sh \
+          | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
         uv --version
 
   pre_build:
