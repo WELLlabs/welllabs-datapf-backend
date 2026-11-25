@@ -139,6 +139,11 @@ phases:
           "$SRC/scripts" \
           "$OUT/"
 
+        # The UpdateBatch stage reads build_output (not the repo), so its
+        # buildspec must travel in the artifact at the same path.
+        mkdir -p "$OUT/deployment/buildspecs"
+        cp "$CODEBUILD_SRC_DIR/deployment/buildspecs/batch-update.yml" "$OUT/deployment/buildspecs/"
+
         # Validate required deployment files.
         echo "Validating deployment bundle..."
 
@@ -151,6 +156,7 @@ phases:
           "scripts/after_install.sh"
           "scripts/application_start.sh"
           "scripts/validate_service.sh"
+          "deployment/buildspecs/batch-update.yml"
         )
 
         for file in "${REQUIRED_FILES[@]}"; do
