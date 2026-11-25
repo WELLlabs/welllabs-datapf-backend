@@ -1,5 +1,6 @@
 # Stage 1: Builder
-FROM python:3.13-slim AS builder
+# Official Docker image via ECR Public: CodeBuild hits Docker Hub's anonymous pull limit (429).
+FROM public.ecr.aws/docker/library/python:3.13-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
@@ -16,7 +17,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --extra visualization
 
 # Stage 2: Runtime — isolated from the API so conversion faults stay here
-FROM python:3.13-slim
+FROM public.ecr.aws/docker/library/python:3.13-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
