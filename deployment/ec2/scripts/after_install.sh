@@ -36,20 +36,18 @@ compose config --quiet \
 
 log "Pulling public service images."
 
+# No service list: pulls every enabled one (db too when the localdb profile is on).
 compose pull --quiet --ignore-buildable \
-  redis \
-  typesense \
-  titiler \
   || fail "Docker image pull failed."
 
 # --------------------------------------------------
-# 3. Build Backend and Email images on EC2
+# 3. Build images on EC2 (backend, email-worker)
 # --------------------------------------------------
 
-log "Building Backend and Email images."
+log "Building application images."
 
-compose build backend email-worker \
-  || fail "Backend or Email Docker image build failed."
+compose build \
+  || fail "Docker image build failed."
 
 # --------------------------------------------------
 # 4. Rollback handling
@@ -67,6 +65,13 @@ fi
 # --------------------------------------------------
 # 5. Run Alembic database migrations (new backend image)
 # --------------------------------------------------
+
+# The migration runs with --no-deps, so a local database must already be up.
+if has_profile localdb; then
+  log "Starting the local PostgreSQL container."
+  compose up -d --wait db \
+    || fail "PostgreSQL container did not become healthy."
+fi
 
 log "Running Alembic database migrations."
 

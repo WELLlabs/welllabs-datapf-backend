@@ -27,8 +27,15 @@ log() { printf '%s [%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "${LIFECYCLE_EV
 fail() { log "ERROR: $*"; exit 1; }
 
 # Shell variables (deploy.env) win over .env for compose interpolation.
+# COMPOSE_PROFILES comes from .env (dev: localdb; prod: unset).
 compose() {
-  docker compose -p "$COMPOSE_PROJECT" --env-file "$ENV_FILE" -f "$RELEASE_DIR/docker-compose.yml" "$@"
+  COMPOSE_PROFILES="$(read_env_var COMPOSE_PROFILES)" \
+    docker compose -p "$COMPOSE_PROJECT" --env-file "$ENV_FILE" -f "$RELEASE_DIR/docker-compose.yml" "$@"
+}
+
+# True when COMPOSE_PROFILES in .env includes the given profile.
+has_profile() {
+  [[ ",$(read_env_var COMPOSE_PROFILES)," == *",$1,"* ]]
 }
 
 # Reads KEY from .env without sourcing it.

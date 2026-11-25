@@ -55,6 +55,12 @@ for key in POSTGRES_URL REDIS_URL DOMAIN SECRET S3_BUCKET; do
   grep -q "^$key=" "$TMP_ENV" || fail "Secret $BACKEND_ENV_SECRET_ID has no $key."
 done
 
+# The localdb profile (dev Postgres container) needs its own password.
+if grep -Eq "^COMPOSE_PROFILES='([^']*,)?localdb(,[^']*)?'" "$TMP_ENV"; then
+  grep -Eq "^POSTGRES_PASSWORD='.+'" "$TMP_ENV" \
+    || fail "COMPOSE_PROFILES has localdb, but the secret has no POSTGRES_PASSWORD."
+fi
+
 chmod 600 "$TMP_ENV"
 mv -f "$TMP_ENV" "$ENV_FILE"
 trap - EXIT

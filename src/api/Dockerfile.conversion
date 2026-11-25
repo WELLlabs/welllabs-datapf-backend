@@ -43,6 +43,7 @@ COPY --chown=appuser:appuser utils/ ./utils/
 COPY --chown=appuser:appuser __init__.py ./
 COPY --chown=appuser:appuser celery_worker.py ./
 COPY --chown=appuser:appuser celery_cpu_worker.py ./
+COPY --chown=appuser:appuser batch_convert.py ./
 
 ENV PYTHONPATH=/app
 

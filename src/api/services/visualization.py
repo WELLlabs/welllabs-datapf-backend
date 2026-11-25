@@ -430,6 +430,19 @@ class VisualizationService:
                 )
 
     def _enqueue_conversion(self, cloud_file_id: UUID) -> None:
+        if settings.BATCH_JOB_QUEUE and settings.BATCH_JOB_DEFINITION:
+            import boto3
+
+            # EC2 instance role credentials; the definition name alone selects
+            # the latest revision (registered by the pipeline's batch-update stage).
+            boto3.client("batch", region_name=settings.S3_REGION).submit_job(
+                jobName=f"convert-{cloud_file_id}",
+                jobQueue=settings.BATCH_JOB_QUEUE,
+                jobDefinition=settings.BATCH_JOB_DEFINITION,
+                parameters={"cloud_file_id": str(cloud_file_id)},
+            )
+            return
+
         from core.celery import celery_app
 
         celery_app.send_task(

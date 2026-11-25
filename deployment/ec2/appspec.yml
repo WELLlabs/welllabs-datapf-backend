@@ -5,7 +5,7 @@
 #
 #   BeforeInstall     checks (docker, aws cli, nginx), writes .env from Secrets Manager
 #   (Install)         copy the revision to /opt/data-platform/release
-#   AfterInstall      pull images, build backend + email, back up DB, migrate
+#   AfterInstall      pull images, build app images, start local DB (dev), migrate
 #   ApplicationStart  docker compose up -d --build
 #   ValidateService   health check must report the new commit
 #

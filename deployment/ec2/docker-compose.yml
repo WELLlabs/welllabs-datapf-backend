@@ -1,7 +1,12 @@
 # Data Platform on EC2. Based on data-platform/docker-compose.prod.yml:
 #   - frontend removed (React app is on S3 + CloudFront)
-#   - conversion-worker commented out (conversions run on AWS Batch)
 #   - titiler port 8001 added (host Nginx proxies /titiler/ to it)
+#
+#   - conversions run on AWS Batch (no conversion worker on EC2)
+#
+# Optional service, switched on by COMPOSE_PROFILES in the backend secret:
+#   localdb  PostgreSQL container (dev). Prod leaves it off and uses RDS.
+#   Dev: COMPOSE_PROFILES=localdb    Prod: COMPOSE_PROFILES not set
 
 services:
   backend:
@@ -120,28 +125,32 @@ services:
       retries: 3
       start_period: 15s
 
-  # Conversions run on AWS Batch, not on EC2.
-  # conversion-worker:
-  #   build:
-  #     context: ./src/api
-  #     dockerfile: Dockerfile.conversion
-  #   env_file:
-  #     - ./.env
-  #   networks:
-  #     - appnet
-  #   depends_on:
-  #     redis:
-  #       condition: service_healthy
-  #   restart: unless-stopped
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "uv run celery -A celery_cpu_worker inspect ping || exit 1"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #     start_period: 20s
+  # Dev database. Port 5432 is published so AWS Batch conversion jobs can reach
+  # it at the EC2 private IP; the EC2 security group allows only the Batch SG.
+  db:
+    image: postgres:16-alpine
+    profiles: ["localdb"]
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_DB: ${POSTGRES_DB:-dataportal}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - appnet
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
 networks:
   appnet:
 
 volumes:
   typesense_data:
+  postgres_data:

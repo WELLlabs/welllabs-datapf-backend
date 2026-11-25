@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     S3_UPLOAD_MAX_SIZE: int = 53_687_091_200  # 50 GiB
     S3_UPLOAD_EXP_TIME_MINS: int = 1440  # 1 day
     S3_DOWNLOAD_EXP_TIME_MINS: int = 1440  # 1 day
+    # AWS Batch conversions. Set both to run conversions on Batch;
+    # blank sends them to the Celery "cpu" queue (local development).
+    BATCH_JOB_QUEUE: str = ""
+    BATCH_JOB_DEFINITION: str = ""
     COOKIE_NAME: str = "auth_cookie"
     COOKIE_MAX_AGE_SECONDS: int = 60 * 60 * 24  # 1 day
 
