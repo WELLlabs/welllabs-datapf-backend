@@ -21,8 +21,6 @@ def main() -> int:
     if len(sys.argv) != 2 or sys.argv[1] in ("", "none"):
         logging.error("Usage: batch_convert.py <cloud_file_id>")
         return 2
-    # Pipeline test marker: proves Batch runs the image from the latest pipeline run.
-    logging.info("PIPELINE TEST v1: batch job started for %s", sys.argv[1])
     result = convert_file(sys.argv[1])
     logging.info("Result: %s", result)
     # Non-zero marks the job FAILED in Batch; the row is already set to removed.
