@@ -31,7 +31,7 @@ dev = [
     "moto[s3]>=5.0.0",
 ]
 visualization = [
-    "duckdb>=1.2.0",
+    "duckdb>=1.2.0",l
     "pyproj>=3.6.0",
     "rio-cogeo>=5.4",
 ]
